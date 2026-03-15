@@ -32,20 +32,21 @@ async function recordRateLimitRequest(key: string): Promise<void> {
 
 const LC_HEADERS = {
   "Content-Type": "application/json",
+  "Accept": "*/*",
+  "Origin": "https://leetcode.com",
   "Referer": "https://leetcode.com",
-  "User-Agent": "Mozilla/5.0",
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36",
+  "x-csrftoken": "csrftoken",
 };
 
 import { parseMaxStreak } from "@/lib/leetcode";
 import { calculateLeetcodeXp } from "@/lib/xp";
 
 async function fetchLeetCodeUser(username: string) {
-  /* Updated to return rich data including globalRanking and max streak */
   const currentYear = new Date().getFullYear();
-  let aliases = "";
-  for (let y = 2015; y <= currentYear; y++) {
-    aliases += `\n        y${y}: userCalendar(year: ${y}) { submissionCalendar }`;
-  }
+  // Only fetch current + previous year calendars to keep query size small
+  // (fetching all years back to 2015 makes the query too large and LeetCode rejects it)
+  const prevYear = currentYear - 1;
 
   const query = `
     query($username: String!) {
@@ -53,19 +54,15 @@ async function fetchLeetCodeUser(username: string) {
         username
         profile {
           realName userAvatar ranking reputation
-          countryName school company websites linkedinUrl twitterUrl githubUrl
+          countryName school company websites
         }
         badges { id name icon displayName }
         submitStats {
           acSubmissionNum { difficulty count }
           totalSubmissionNum { difficulty count }
         }
-        tagProblemCounts {
-          advanced { tagName problemsSolved }
-          intermediate { tagName problemsSolved }
-          fundamental { tagName problemsSolved }
-        }
-        userCalendar { streak totalActiveDays }${aliases}
+        yearCurrent: userCalendar(year: ${currentYear}) { streak totalActiveDays submissionCalendar }
+        yearPrev: userCalendar(year: ${prevYear}) { submissionCalendar }
       }
       userContestRanking(username: $username) {
         rating
@@ -82,9 +79,32 @@ async function fetchLeetCodeUser(username: string) {
       headers: LC_HEADERS,
       body: JSON.stringify({ query, variables: { username } }),
     });
-    const json = await res.json();
+    if (!res.ok) {
+      console.error(`[/api/dev] LeetCode responded ${res.status} for user "${username}"`);
+      return null;
+    }
+    const rawText = await res.text();
+    let json: any;
+    try { json = JSON.parse(rawText); } catch { 
+      console.error(`[/api/dev] LeetCode non-JSON response for "${username}": ${rawText.substring(0, 200)}`);
+      return null;
+    }
+    if (!json?.data?.matchedUser) {
+      console.error(`[/api/dev] LeetCode returned no matchedUser for "${username}". Status: ${res.status}. firstErr:`, json?.errors?.[0]?.message);
+    }
     if (json?.data?.matchedUser) {
-       json.data.matchedUser.maxStreak = parseMaxStreak(json.data.matchedUser, currentYear);
+      // Map calendar data into the structure parseMaxStreak expects (y<year> keys)
+      const mu = json.data.matchedUser;
+      // Both are aliased: yearCurrent = this year, yearPrev = last year
+      if (mu.yearCurrent) {
+        (mu as Record<string, unknown>)[`y${currentYear}`] = mu.yearCurrent;
+        // Populate streak/totalActiveDays from the aliased calendar
+        if (!mu.userCalendar) {
+          mu.userCalendar = { streak: mu.yearCurrent.streak ?? 0, totalActiveDays: mu.yearCurrent.totalActiveDays ?? 0 };
+        }
+      }
+      if (mu.yearPrev) (mu as Record<string, unknown>)[`y${prevYear}`] = mu.yearPrev;
+      mu.maxStreak = parseMaxStreak(mu, currentYear);
     }
     return json?.data ?? null;
   } catch {
@@ -116,12 +136,15 @@ export async function GET(
   }
 
   // Rate limit check
+  // Bypass rate limit for authenticated force-refreshes (e.g., the ↻ button in the building card)
   let rateLimitKey: string | null = null;
+  let isAuthenticatedUser = false;
   if (!cachedRecord) {
     let key: string;
     try {
       const authClient = await createServerSupabase();
       const { data: { user } } = await authClient.auth.getUser();
+      isAuthenticatedUser = !!user;
       key = user ? `user:${user.id}` : (
         request.headers.get("x-forwarded-for")?.split(",")[0]?.trim() ?? "unknown"
       );
@@ -129,7 +152,9 @@ export async function GET(
       key = "unknown";
     }
     rateLimitKey = key;
-    if (await isRateLimited(key)) {
+    // Skip rate limiting if this is a force-refresh from a logged-in user
+    const skipRateLimit = forceRefresh && isAuthenticatedUser;
+    if (!skipRateLimit && await isRateLimited(key)) {
       return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 });
     }
   }

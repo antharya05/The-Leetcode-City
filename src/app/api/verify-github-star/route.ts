@@ -26,7 +26,12 @@ async function isStargazer(login: string): Promise<boolean> {
       `https://api.github.com/repos/${REPO_OWNER}/${REPO_NAME}/stargazers?per_page=100&page=${page}`,
       { headers: ghHeaders() },
     );
-    if (!res.ok) return false;
+    if (!res.ok) {
+      if (res.status === 403 || res.status === 429) {
+        throw new Error("GitHub API rate limit exceeded. Please try again later.");
+      }
+      return false;
+    }
 
     const users = (await res.json()) as { login: string }[];
     if (users.length === 0) break;
@@ -90,7 +95,13 @@ export async function POST() {
   }
 
   // Check LeetCode star
-  const starred = await isStargazer(githubLogin);
+  let starred = false;
+  try {
+    starred = await isStargazer(githubLogin);
+  } catch (err: any) {
+    return NextResponse.json({ error: err.message || "Failed to verify star" }, { status: 500 });
+  }
+
   if (!starred) {
     return NextResponse.json({ ok: true, verified: false });
   }

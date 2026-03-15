@@ -424,7 +424,9 @@ function HomeContent() {
   const [flyPaused, setFlyPaused] = useState(false);
   const [flyPauseSignal, setFlyPauseSignal] = useState(0);
   const [flyScore, setFlyScore] = useState({ score: 0, earned: 0, combo: 0, collected: 0, maxCombo: 1 });
+  const flyScoreRef = useRef({ score: 0, earned: 0, combo: 0, collected: 0, maxCombo: 1 });
   const [flyPersonalBest, setFlyPersonalBest] = useState(0);
+  const flyPersonalBestRef = useRef(0);
   const flyStartTime = useRef(0);
   const flyPausedAt = useRef(0);
   const flyTotalPauseMs = useRef(0);
@@ -742,8 +744,16 @@ function HomeContent() {
   const authLogin = (
     session?.user?.user_metadata?.user_name ??
     session?.user?.user_metadata?.preferred_username ??
+    session?.user?.user_metadata?.login ??
+    session?.user?.user_metadata?.full_name ??
     ""
   ).toLowerCase();
+
+  // Extra guard: check if selected building is own by comparing linked account
+  const isOwnBuilding = !!selectedBuilding && (
+    (authLogin !== "" && selectedBuilding.login.toLowerCase() === authLogin) ||
+    (!!linkedLeetCodeUsername && selectedBuilding.login.toLowerCase() === linkedLeetCodeUsername.toLowerCase())
+  );
 
   // Fly timer — ticks every second while flying and not paused
   useEffect(() => {
@@ -1418,6 +1428,9 @@ function HomeContent() {
 
   // Flight exit logic
   const endFly = useCallback((aborted = false) => {
+    // Use refs for flyScore / flyPersonalBest to always read the latest value,
+    // even if EXIT is clicked during the brief window between a batch setState and re-render.
+    const currentScore = flyScoreRef.current;
     const wallMs = Date.now() - flyStartTime.current;
     // Exclude pause time from flight duration
     const currentPauseMs = flyPausedAt.current > 0 ? Date.now() - flyPausedAt.current : 0;
@@ -1425,17 +1438,25 @@ function HomeContent() {
     // Time bonus: % of base score scaled by how fast you finished (max +50% of base score)
     // Rewards efficiency without letting quick-quits dominate
     const FLY_TIME_LIMIT = 900; // 15 minutes as requested by user
-    const timeFraction = (!aborted && flyScore.collected > 0) ? Math.max(0, (FLY_TIME_LIMIT - flightMs / 1000) / FLY_TIME_LIMIT) : 0;
-    const timeBonus = Math.floor(flyScore.score * 0.5 * timeFraction);
-    const finalScore = flyScore.score + timeBonus;
+    const timeFraction = (!aborted && currentScore.collected > 0) ? Math.max(0, (FLY_TIME_LIMIT - flightMs / 1000) / FLY_TIME_LIMIT) : 0;
+    const timeBonus = Math.floor(currentScore.score * 0.5 * timeFraction);
+    const finalScore = currentScore.score + timeBonus;
+    
+    // Daily mission tracking (fly mode quota)
+    if (finalScore > 0) {
+      trackMissionRef.current("fly_score_50", finalScore);
+      trackMissionRef.current("fly_score_150", finalScore);
+    }
+
     // Read current PB fresh from localStorage (React state may be stale)
-    let currentPB = flyPersonalBest;
+    let currentPB = flyPersonalBestRef.current;
     try { currentPB = Math.max(currentPB, parseInt(localStorage.getItem("leetcodecity_fly_pb") || "0", 10) || 0); } catch { }
     // Only show "New PB!" if there WAS a previous best to beat (not on first-ever flight)
     const isNewPB = currentPB > 0 && finalScore > currentPB;
     // Update personal best
     if (isNewPB) {
       setFlyPersonalBest(finalScore);
+      flyPersonalBestRef.current = finalScore;
       try { localStorage.setItem("leetcodecity_fly_pb", String(finalScore)); } catch { }
     }
     // Update fly history (streak, days played, per-seed scores)
@@ -1471,20 +1492,21 @@ function HomeContent() {
     }
     // Exit fly immediately (don't block on API)
     setFlyMode(false); setFlyPaused(false); lastDistrictRef.current = null; setDistrictAnnouncement(null); clearTimeout(announceTimerRef.current);
+    setQuotaReached(false); setQuotaNotified(false); setFlyElapsedSec(0);
     // Feature 4: Show post-flight results (rank fills in async)
     if (finalScore > 0) {
-      const captured = { score: finalScore, collected: flyScore.collected, maxCombo: flyScore.maxCombo, timeBonus, isNewPB };
+      const captured = { score: finalScore, collected: currentScore.collected, maxCombo: currentScore.maxCombo, timeBonus, isNewPB };
       // Show immediately with rank=0, then update when POST returns
       setShowFlyResults({ ...captured, rank: 0, totalPilots: 0 });
       if (flyResultsTimerRef.current) clearTimeout(flyResultsTimerRef.current);
       flyResultsTimerRef.current = setTimeout(() => setShowFlyResults(null), 12000);
       // Fire POST in background, update rank when it returns
       if (session) {
-        const maxComboVal = Math.min(Math.max(flyScore.maxCombo, 1), 3);
+        const maxComboVal = Math.min(Math.max(currentScore.maxCombo, 1), 3);
         fetch("/api/fly-scores", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ score: finalScore, collected: flyScore.collected, max_combo: maxComboVal, flight_ms: flightMs }),
+          body: JSON.stringify({ score: finalScore, collected: currentScore.collected, max_combo: maxComboVal, flight_ms: flightMs }),
         })
           .then((r) => r.ok ? r.json() : null)
           .then((d) => {
@@ -1495,7 +1517,7 @@ function HomeContent() {
           .catch(() => { });
       }
     }
-  }, [flyScore, flyPersonalBest, session]);
+  }, [session]);
 
   const endIntro = useCallback(() => {
     setIntroMode(false);
@@ -1672,9 +1694,6 @@ function HomeContent() {
       setFeedback(null);
       setLoading(false);
 
-      // Focus camera on the searched building
-      setFocusedBuilding(devData.github_login);
-
       // If dev is new, inject into local raw array and regenerate layout instantly
       let updatedBuildings: CityBuilding[] | null = null;
       if (!existedBefore) {
@@ -1712,6 +1731,9 @@ function HomeContent() {
         }
       }
 
+      // Focus camera on the searched building — AFTER layout is updated so it exists
+      setFocusedBuilding(devData.github_login);
+
       // A8: Ghost preview — if user searched for themselves, show temporary effect
       if (
         authLogin &&
@@ -1743,14 +1765,17 @@ function HomeContent() {
           }
         }
       } else if (!existedBefore) {
-        // New developer: show the share modal
+        // New developer: show the share modal, then enter explore mode to show profile card
         setShareData({
           login: devData.github_login,
           contributions: devData.contributions,
           rank: devData.rank,
           avatar_url: devData.avatar_url,
         });
-        if (foundBuilding) setSelectedBuilding(foundBuilding);
+        if (foundBuilding) {
+          setSelectedBuilding(foundBuilding);
+          setExploreMode(true);
+        }
         setCopied(false);
       } else if (foundBuilding) {
         // Existing developer: enter explore mode and show profile card
@@ -1917,10 +1942,10 @@ function HomeContent() {
 
   // City energy: devs coding -> city lights up. 0 devs = nearly dark, 5+ = full brightness
   const cityEnergy = useMemo(() => {
-    if (codingCount === 0) return 0.4;
-    if (codingCount === 1) return 0.5;
-    if (codingCount === 2) return 0.65;
-    if (codingCount <= 5) return 0.65 + (codingCount - 2) * 0.12; // 3->0.77, 5->1.0
+    if (codingCount === 0) return 0.15; // sleeping — dimmer city
+    if (codingCount === 1) return 0.4;
+    if (codingCount === 2) return 0.55;
+    if (codingCount <= 5) return 0.55 + (codingCount - 2) * 0.12; // 3->0.67, 5->0.91
     if (codingCount <= 15) return 1.0 + (Math.min(codingCount, 15) - 5) * 0.02; // 10->1.1, 15->1.2
     return Math.min(1.4, 1.2 + (codingCount - 15) * 0.02); // 25+->1.4 cap
   }, [codingCount]);
@@ -2065,7 +2090,10 @@ function HomeContent() {
           }
           setFlyPaused(p);
         }}
-        onCollect={(score, earned, combo, collected, maxCombo) => setFlyScore({ score, earned, combo, collected, maxCombo })}
+        onCollect={(score, earned, combo, collected, maxCombo) => {
+          flyScoreRef.current = { score, earned, combo, collected, maxCombo };
+          setFlyScore({ score, earned, combo, collected, maxCombo });
+        }}
         focusedBuilding={focusedBuilding}
         focusedBuildingB={focusedBuildingB}
         accentColor={theme.accent}
@@ -2312,9 +2340,29 @@ function HomeContent() {
                 </span>
               )}
               
+              <span className="mx-1 text-border">|</span>
+              {/* Vehicle selector */}
+              {([
+                { id: "airplane", label: "✈", title: "Airplane" },
+                { id: "futuristic_jet", label: "🚀", title: "Futuristic Jet" },
+              ] as { id: string; label: string; title: string }[]).map((v) => (
+                <button
+                  key={v.id}
+                  onClick={() => setFlyVehicle(v.id)}
+                  title={v.title}
+                  className="pointer-events-auto btn-press border px-1.5 py-0.5 text-[11px] transition-colors"
+                  style={{
+                    borderColor: flyVehicle === v.id ? theme.accent : "rgba(255,255,255,0.15)",
+                    backgroundColor: flyVehicle === v.id ? theme.accent + "22" : "transparent",
+                    color: flyVehicle === v.id ? theme.accent : "#888",
+                  }}
+                >
+                  {v.label}
+                </button>
+              ))}
               <button
                 onClick={() => endFly(false)}
-                className="btn-press ml-2 border border-border-light bg-bg-raised/80 px-2 py-1 text-[9px] font-bold text-cream transition-colors hover:bg-border"
+                className="pointer-events-auto btn-press ml-2 border border-border-light bg-bg-raised/80 px-2 py-1 text-[9px] font-bold text-cream transition-colors hover:bg-border"
               >
                 EXIT
               </button>
@@ -2326,11 +2374,11 @@ function HomeContent() {
             <div className="absolute top-20 left-1/2 z-50 -translate-x-1/2 animate-bounce-short">
               <div className="flex flex-col items-center gap-2 border-[3px] border-[#4ade80] bg-bg/90 p-4 text-center backdrop-blur-md shadow-lg">
                 <div className="text-[12px] font-bold text-[#4ade80]">MISSION QUOTA MATCHED!</div>
-                <div className="text-[10px] text-cream/80">You've reached 50 PX. Exit now to complete quest?</div>
+                <div className="text-[10px] text-cream/80">You&apos;ve reached 50 PX. Exit now to complete quest?</div>
                 <div className="mt-2 flex gap-3">
                   <button
                     onClick={() => endFly(false)}
-                    className="btn-press bg-[#4ade80] px-3 py-1.5 text-[10px] font-bold text-bg transition-all hover:brightness-110"
+                    className="pointer-events-auto btn-press bg-[#4ade80] px-3 py-1.5 text-[10px] font-bold text-bg transition-all hover:brightness-110"
                   >
                     EXIT NOW
                   </button>
@@ -3667,7 +3715,7 @@ function HomeContent() {
               )}
 
               {/* A7: Show equipped items on other devs' buildings (mimetic desire) */}
-              {selectedBuilding.login.toLowerCase() !== authLogin && (() => {
+              {!isOwnBuilding && (() => {
                 const equipped: string[] = [];
                 if (selectedBuilding.loadout?.crown) equipped.push(selectedBuilding.loadout.crown);
                 if (selectedBuilding.loadout?.roof) equipped.push(selectedBuilding.loadout.roof);
@@ -3699,7 +3747,7 @@ function HomeContent() {
                         </span>
                       )}
                     </div>
-                    {session && selectedBuilding.login.toLowerCase() !== authLogin && (
+                    {session && !isOwnBuilding && (
                       <Link
                         href={`/shop/${authLogin}`}
                         className="btn-press mt-2 block w-full py-1.5 text-center text-[9px] text-bg"
@@ -3716,7 +3764,7 @@ function HomeContent() {
               })()}
 
               {/* Kudos: give kudos (other's building, logged in) */}
-              {session && selectedBuilding.login.toLowerCase() !== authLogin && (
+              {session && !isOwnBuilding && (
                 <div className="relative mx-4 mb-3">
                   {/* Floating emoji animation on success */}
                   {kudosSent && (
@@ -3828,7 +3876,7 @@ function HomeContent() {
               )}
 
               {/* Compare button */}
-              {!flyMode && selectedBuilding.login.toLowerCase() !== authLogin && (
+              {!flyMode && !isOwnBuilding && (
                 <div className="mx-4 mb-3">
                   <button
                     onClick={() => {
@@ -4424,7 +4472,15 @@ function HomeContent() {
           isMobile={isMobile}
           onClaim={claimDailies}
           onRefresh={refreshDailies}
-          onStartFly={() => setFlyMode(true)}
+          onStartFly={() => {
+            setFlyScore({ score: 0, earned: 0, combo: 0, collected: 0, maxCombo: 1 });
+            flyStartTime.current = Date.now();
+            flyPausedAt.current = 0;
+            setFlyElapsedSec(0);
+            setQuotaReached(false);
+            setQuotaNotified(false);
+            setFlyMode(true);
+          }}
         />
       )}
 

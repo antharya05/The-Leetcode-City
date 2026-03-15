@@ -62,12 +62,12 @@ export function useDailies(session: Session | null, hasClaimed: boolean) {
   }, []);
 
   const trackClientMission = useCallback(
-    async (missionId: string) => {
+    async (missionId: string, points: number = 1) => {
       if (!data) return;
       const mission = data.missions.find((m) => m.id === missionId);
       if (!mission || mission.completed) return;
 
-      const newProgress = Math.min(mission.progress + 1, mission.threshold);
+      const newProgress = Math.min(mission.progress + points, mission.threshold);
       const justCompleted = newProgress >= mission.threshold;
 
       // Show toast
@@ -101,7 +101,7 @@ export function useDailies(session: Session | null, hasClaimed: boolean) {
       fetch("/api/dailies/progress", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mission_id: missionId }),
+        body: JSON.stringify({ mission_id: missionId, points }),
       }).catch(() => { });
     },
     [data, addToast],

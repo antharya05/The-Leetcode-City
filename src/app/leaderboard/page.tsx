@@ -121,7 +121,7 @@ export default async function LeaderboardPage({
     const { data } = await supabase
       .from("developers")
       .select("github_login, name, avatar_url, contributions, contributions_total, total_stars, public_repos, primary_language, rank, referral_count, kudos_count, created_at, xp_total, xp_level, easy_solved, medium_solved, hard_solved, contest_rating, contest_rank, lc_global_rank, lc_streak, active_days_last_year")
-      .not("easy_solved", "is", null)
+      .gt("contributions", 0)
       .order(orderColumn, { ascending: orderAscending, nullsFirst: false })
       .order("created_at", { ascending: true })
       .limit(50);

@@ -10,7 +10,7 @@ export async function GET() {
     const admin = getSupabaseAdmin();
     const { data } = await admin
         .from("developers")
-        .select("github_login, claimed")
+        .select("github_login, claimed, xp_level, xp_total")
         .eq("claimed_by", user.id)
         .eq("claimed", true)   // only count active claims
         .single();
@@ -18,5 +18,7 @@ export async function GET() {
     return NextResponse.json({
         leetcode_username: data?.github_login ?? null,
         claimed: data?.claimed ?? false,
+        xp_level: data?.xp_level ?? 1,
+        xp_total: data?.xp_total ?? 0,
     });
 }

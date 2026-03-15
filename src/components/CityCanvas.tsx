@@ -680,10 +680,18 @@ function AirplaneFlight({ onExit, onHud, onPause, pauseSignal = 0, hasOverlay = 
       onPause(false);
     };
 
-    const FLIGHT_KEYS = new Set(["KeyW", "KeyA", "KeyS", "KeyD", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", "ShiftLeft", "ShiftRight"]);
+    const FLIGHT_KEYS = new Set([
+      "KeyW", "KeyA", "KeyS", "KeyD", 
+      "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", 
+      "ShiftLeft", "ShiftRight", "Shift", "AltLeft", "AltRight", "Alt"
+    ]);
 
     const down = (e: KeyboardEvent) => {
+      // Store both exact code and standard key name for modifiers to be safe
       keys.current[e.code] = true;
+      if (e.key === "Shift") keys.current["Shift"] = true;
+      if (e.key === "Alt") keys.current["Alt"] = true;
+
       if (e.code === "Escape") {
         if (!paused.current) {
           // Flying → pause
@@ -699,12 +707,16 @@ function AirplaneFlight({ onExit, onHud, onPause, pauseSignal = 0, hasOverlay = 
         e.preventDefault();
         if (paused.current) doResume();
         else doPause();
-      } else if (paused.current && FLIGHT_KEYS.has(e.code)) {
+      } else if (paused.current && (FLIGHT_KEYS.has(e.code) || FLIGHT_KEYS.has(e.key))) {
         // Any flight key while paused → resume flying
         doResume();
       }
     };
-    const up = (e: KeyboardEvent) => { keys.current[e.code] = false; };
+    const up = (e: KeyboardEvent) => { 
+      keys.current[e.code] = false;
+      if (e.key === "Shift") keys.current["Shift"] = false;
+      if (e.key === "Alt") keys.current["Alt"] = false;
+    };
     window.addEventListener("keydown", down);
     window.addEventListener("keyup", up);
     return () => {
@@ -760,8 +772,8 @@ function AirplaneFlight({ onExit, onHud, onPause, pauseSignal = 0, hasOverlay = 
 
     // Shift = boost 2x, Alt = slow 0.3x
     let speedMult = 1;
-    if (k["ShiftLeft"] || k["ShiftRight"]) speedMult = 2;
-    if (k["AltLeft"] || k["AltRight"]) speedMult = 0.3;
+    if (k["ShiftLeft"] || k["ShiftRight"] || k["Shift"]) speedMult = 2.5;
+    if (k["AltLeft"] || k["AltRight"] || k["Alt"]) speedMult = 0.3;
 
     const actualSpeed = flySpeed.current * speedMult;
 
@@ -814,9 +826,9 @@ function AirplaneFlight({ onExit, onHud, onPause, pauseSignal = 0, hasOverlay = 
     hudTimer.current += dt;
     if (hudTimer.current > 0.25) {
       hudTimer.current = 0;
-      lastHudSpeed.current = Math.round(flySpeed.current);
+      lastHudSpeed.current = Math.round(actualSpeed);
       lastHudAlt.current = Math.round(pos.current.y);
-      onHud(flySpeed.current, pos.current.y, pos.current.x, pos.current.z, yaw.current);
+      onHud(actualSpeed, pos.current.y, pos.current.x, pos.current.z, yaw.current);
     }
   });
 

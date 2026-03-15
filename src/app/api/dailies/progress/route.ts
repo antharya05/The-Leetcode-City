@@ -20,7 +20,8 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json();
-  const { mission_id } = body as { mission_id: string };
+  const { mission_id, points } = body as { mission_id: string; points?: number };
+  const increment = typeof points === "number" && points > 0 ? points : 1;
 
   if (!mission_id || !MISSIONS_BY_ID.has(mission_id)) {
     return NextResponse.json({ error: "Invalid mission_id" }, { status: 400 });
@@ -50,7 +51,7 @@ export async function POST(request: Request) {
     p_developer_id: dev.id,
     p_mission_id: mission_id,
     p_threshold: mission.threshold,
-    p_increment: 1,
+    p_increment: increment,
   });
 
   if (rpcError) {

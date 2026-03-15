@@ -4,6 +4,7 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import Image from "next/image";
 import type { ShopItem } from "@/lib/items";
+import { levelFromXp } from "@/lib/xp";
 import {
   ZONE_ITEMS,
   ZONE_LABELS,
@@ -643,10 +644,12 @@ export default function ShopClient({
   initialPoints = 0,
   initialBuildingStyle = "tower",
   consumablesInventory = [],
-  xpLevel = 1,
+  xpLevel: initialXpLevel = 1,
   acceptedMedium = 0,
   acceptedHard = 0,
 }: Props) {
+  // Reactive XP level — updated locally after XP code redemption
+  const [xpLevel, setXpLevel] = useState(initialXpLevel);
   // Loadout state
   const [loadout, setLoadout] = useState<Loadout>(
     initialLoadout ?? { crown: null, roof: null, aura: null }
@@ -1099,16 +1102,47 @@ export default function ShopClient({
     setRedeemState("loading");
     setRedeemMsg("");
     try {
-      const res = await fetch("/api/shop/redeem", {
+      const isXPCode = trimmed.startsWith("CITY-XP");
+      const isAllItemsCode = trimmed.startsWith("CITY-ALL-");
+      const endpoint = isXPCode
+        ? "/api/shop/redeem-xp"
+        : isAllItemsCode
+          ? "/api/shop/redeem-special"
+          : "/api/shop/redeem";
+
+      const res = await fetch(endpoint, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ code: trimmed }),
       });
       const data = await res.json();
       if (res.ok) {
-        setOwned((prev) => prev.includes(data.item_id) ? prev : [...prev, data.item_id]);
+        if (!isXPCode && !isAllItemsCode && data.item_id) {
+          setOwned((prev) => prev.includes(data.item_id) ? prev : [...prev, data.item_id]);
+        }
+        if (isAllItemsCode && Array.isArray(data.granted_items)) {
+          // Add all newly unlocked items to local owned state
+          setOwned((prev) => {
+            const newItems = (data.granted_items as string[]).filter(id => !prev.includes(id));
+            return newItems.length > 0 ? [...prev, ...newItems] : prev;
+          });
+        }
+        if (isXPCode && (data.xp_granted || data.new_xp_total)) {
+          if (data.new_xp_total) {
+            setXpLevel(levelFromXp(data.new_xp_total));
+          } else {
+            setXpLevel((prev) => Math.max(prev, levelFromXp((prev === 1 ? 0 : prev * 25) + data.xp_granted)));
+          }
+          fetch("/api/me").then(r => r.json()).then(d => {
+            if (d?.xp_level) setXpLevel(d.xp_level);
+          }).catch(() => {});
+        }
         setRedeemState("success");
-        setRedeemMsg(data.message ?? `🎉 ${data.item_name} added to your inventory!`);
+        setRedeemMsg(data.message ?? (
+          isXPCode ? `🎉 XP claimed successfully!` :
+          isAllItemsCode ? `🎁 Items unlocked!` :
+          `🎉 ${data.item_name} added to your inventory!`
+        ));
         setRedeemCode("");
         setTimeout(() => setRedeemState("idle"), 5000);
       } else {
@@ -1639,7 +1673,6 @@ export default function ShopClient({
                 );
               })}
 
-
               {/* FACES zone */}
               <div className="border-[3px] border-border bg-bg-raised p-4">
                 <div className="flex items-center justify-between mb-3">
@@ -1657,9 +1690,8 @@ export default function ShopClient({
                     const isOwned = owned.includes(itemId);
                     const shopItem = getShopItem(itemId);
                     const isBillboard = itemId === "billboard";
-                    const achUnlock = ACHIEVEMENT_ITEMS[itemId];
-                    const hasAchievement = achUnlock && achievements.includes(achUnlock.achievement);
                     const isBuying = buyingItem === itemId;
+                    const isConfirming = confirmBuyItem === itemId;
 
                     let badge: string;
                     let badgeColor: string;
@@ -1669,9 +1701,6 @@ export default function ShopClient({
                     } else if (isBillboard && billboardSlots > 0) {
                       badge = `x${billboardSlots}`;
                       badgeColor = ACCENT;
-                    } else if (achUnlock && !shopItem?.price_usd_cents) {
-                      badge = hasAchievement ? "Unlockable!" : achUnlock.label.split("(")[0].trim();
-                      badgeColor = hasAchievement ? "#39d353" : "#a0a0b0";
                     } else if (shopItem) {
                       badge = formatPrice(shopItem);
                       badgeColor = "#a0a0b0";
@@ -1680,49 +1709,22 @@ export default function ShopClient({
                       badgeColor = "#a0a0b0";
                     }
 
-                    const isConfirming = confirmBuyItem === itemId;
-                    const isFacesOwned = isOwned || (isBillboard && billboardSlots > 0);
-
-                    const handleClick = () => {
-                      setHighlightItem(itemId);
-                      if (isBillboard && isFacesOwned) {
-                        // Already owned, scroll to upload — no action needed on card
-                        return;
-                      }
-                      if (isOwned) return; // faces items don't equip/unequip
-                      if (shopItem && shopItem.price_usd_cents > 0) {
-                        setConfirmBuyItem(isConfirming ? null : itemId);
-                      }
-                    };
-
-                    const facesScarcity = shopItem ? getScarcityInfo(shopItem, totalPurchaseCounts[itemId] ?? 0) : null;
-                    const facesSoldOut = facesScarcity?.expired === true;
-
                     return (
                       <div key={itemId} className="relative" data-buy-popover>
-                        {/* A11: Scarcity badge */}
-                        {facesScarcity && !isFacesOwned && (
-                          <span
-                            className="absolute top-1 right-1 z-10 px-1 py-px text-[7px] font-bold"
-                            style={{
-                              backgroundColor: `${facesScarcity.color}20`,
-                              color: facesScarcity.color,
-                              border: `1px solid ${facesScarcity.color}40`,
-                            }}
-                          >
-                            {shopItem?.is_exclusive && "💎 "}{facesScarcity.label}
-                          </span>
-                        )}
                         <button
-                          onClick={facesSoldOut && !isFacesOwned ? undefined : handleClick}
-                          disabled={isBuying || (facesSoldOut && !isFacesOwned)}
-                          onMouseEnter={() => setHighlightItem(itemId)}
-                          onMouseLeave={() => setHighlightItem(null)}
+                          onClick={() => {
+                            if (isOwned || isBuying) return;
+                            if (shopItem && shopItem.price_usd_cents > 0) {
+                              setConfirmBuyItem(isConfirming ? null : itemId);
+                            }
+                          }}
+                          disabled={isBuying || isOwned}
                           className={[
                             "flex flex-col items-center justify-center p-2 transition-all w-full aspect-square",
-                            isFacesOwned ? "border-[3px] border-[#39d353] bg-[rgba(57,211,83,0.1)]" : "border-[2px] border-border bg-bg-card opacity-60",
-                            isConfirming ? "border-[var(--color-border-light)]" : "",
-                            "hover:border-border-light",
+                            isOwned ? "border-[3px]" : "border-[2px]",
+                            isOwned ? "border-[#39d353]" : isConfirming ? "border-[var(--color-border-light)]" : "border-border",
+                            isOwned ? "bg-[rgba(57,211,83,0.1)]" : "bg-bg-card",
+                            !isOwned ? "opacity-60 hover:border-border-light hover:opacity-100" : ""
                           ].join(" ")}
                         >
                           <span className="text-3xl">{ITEM_EMOJIS[itemId] ?? "?"}</span>
@@ -1735,58 +1737,41 @@ export default function ShopClient({
                           >
                             {isBuying ? "..." : badge}
                           </span>
-                          {/* A13: Social proof */}
-                          {(purchaseCounts[itemId] ?? 0) >= 3 && !isFacesOwned && (
-                            <span className="mt-0.5 text-[8px] text-dim">
-                              {purchaseCounts[itemId]} purchased this week
-                            </span>
-                          )}
                         </button>
+                        
+                        {/* Custom Color Picker Preview */}
+                        {isOwned && itemId === "custom_color" && (
+                          <div className="mt-2 w-full flex justify-center">
+                            <input
+                              type="color"
+                              value={customColor ?? "#ffffff"}
+                              onChange={(e) => setCustomColor(e.target.value)}
+                              className="w-full h-8 cursor-pointer border-[2px] border-border bg-bg-raised p-1 hover:border-border-light"
+                            />
+                          </div>
+                        )}
+                        
+                        {/* Billboard Edit Button Preview */}
+                        {((isOwned && itemId === "billboard") || billboardSlots > 0) && itemId === "billboard" && (
+                          <div className="mt-2 w-full flex justify-center text-[9px] text-muted normal-case hover:text-cream">
+                            {billboardImages.length} images set
+                          </div>
+                        )}
 
-                        {/* Buy confirmation popover */}
+                        {/* Buy Confirmation */}
                         {isConfirming && shopItem && (
-                          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 w-36 border-[2px] border-border bg-bg p-2 shadow-lg">
-                            <p className="text-[9px] text-cream text-center mb-1.5">
-                              {ITEM_NAMES[itemId]}
+                          <div className="absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 w-48 border-[3px] border-border bg-bg-raised p-3 shadow-xl">
+                            <p className="text-[10px] text-cream normal-case mb-2 leading-relaxed">
+                              Get {ITEM_NAMES[itemId]} for {formatPrice(shopItem)}?
                             </p>
-                            <p className="text-[10px] text-center mb-2" style={{ color: ACCENT }}>
-                              {formatPrice(shopItem)}
-                            </p>
-                            <div className="flex flex-col gap-1">
-                              <div className="flex gap-1">
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); }}
-                                  className="flex-1 border-[2px] border-border py-1 text-[9px] text-muted hover:text-cream"
-                                >
-                                  Cancel
-                                </button>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId); }}
-                                  disabled={isBuying}
-                                  className="btn-press flex-1 py-1 text-[9px] text-bg disabled:opacity-40"
-                                  style={{ backgroundColor: ACCENT, boxShadow: `1px 1px 0 0 ${SHADOW}` }}
-                                >
-                                  {isBuying ? "..." : "Buy"}
-                                </button>
-                              </div>
+                            <div className="flex flex-col gap-1.5">
                               <button
-                                onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "nowpayments"); }}
-                                disabled={isBuying}
-                                className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40"
-                                style={{ backgroundColor: "#f7931a", boxShadow: "1px 1px 0 0 #b36a00" }}
+                                onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); setBuyingItem(itemId); setBuyingProvider("stripe"); }}
+                                className="btn-press py-1.5 text-[9px] text-bg"
+                                style={{ backgroundColor: ACCENT }}
                               >
-                                {isBuying ? "..." : "Pay with Crypto"}
+                                {isBuying ? "..." : "Pay with Card"}
                               </button>
-                              {isBrazil && (
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "abacatepay"); }}
-                                  disabled={isBuying}
-                                  className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40"
-                                  style={{ backgroundColor: "#32bcad", boxShadow: "1px 1px 0 0 #1a7a6e" }}
-                                >
-                                  {isBuying ? "..." : "Pay with PIX"}
-                                </button>
-                              )}
                             </div>
                           </div>
                         )}
@@ -1794,58 +1779,8 @@ export default function ShopClient({
                     );
                   })}
                 </div>
-
-                {/* Color picker (if custom_color exists in items) */}
-                {items.some((i) => i.id === "custom_color") && (
-                  <ColorPickerPanel
-                    currentColor={customColor}
-                    isOwned={owned.includes("custom_color")}
-                    onPreview={(c) => setPreviewColor(c)}
-                    onSave={async (c) => {
-                      try {
-                        const res = await fetch("/api/customizations", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ item_id: "custom_color", color: c }),
-                        });
-                        if (res.ok) {
-                          setCustomColor(c);
-                          setPreviewColor(null);
-                          return true;
-                        }
-                      } catch { /* ignore */ }
-                      return false;
-                    }}
-                    onRemove={async () => {
-                      try {
-                        const res = await fetch("/api/customizations", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ item_id: "custom_color", color: null }),
-                        });
-                        if (res.ok) {
-                          setCustomColor(null);
-                          setPreviewColor(null);
-                          return true;
-                        }
-                      } catch { /* ignore */ }
-                      return false;
-                    }}
-                  />
-                )}
-
-                {/* Billboard upload */}
-                {items.some((i) => i.id === "billboard") && (
-                  <BillboardUploadPanel
-                    images={previewBillboardImages ?? billboardImages}
-                    slotCount={billboardSlots}
-                    isOwned={billboardSlots > 0}
-                    autoUploading={autoUploading}
-                    onImagesChange={(imgs) => { setBillboardImages(imgs); setPreviewBillboardImages(null); }}
-                    onPreviewChange={(imgs) => setPreviewBillboardImages(imgs)}
-                  />
-                )}
               </div>
+
 
               {/* Consumables section */}
               {(() => {
@@ -1999,37 +1934,28 @@ export default function ShopClient({
               </button>
 
               {RAID_VEHICLE_ITEMS.map((itemId) => {
-                const isOwned = owned.includes(itemId);
-                const isActive = isOwned && raidLoadout.vehicle === itemId;
-                const shopItem = getShopItem(itemId);
-                const isBuying = buyingItem === itemId;
-                const isConfirming = confirmBuyItem === itemId;
+                const reqLevel = ITEM_UNLOCK_LEVELS[itemId];
+                const isLevelLocked = reqLevel && xpLevel < reqLevel;
+                const isAccessible = owned.includes(itemId) || !isLevelLocked;
+                const isActive = isAccessible && raidLoadout.vehicle === itemId;
 
                 return (
-                  <div key={itemId} className="relative" data-buy-popover>
+                  <div key={itemId} className="relative">
                     <button
                       onClick={() => {
-                        if (isOwned) {
+                        if (isAccessible) {
                           handleSetRaidVehicle(itemId);
-                          return;
-                        }
-                        if (shopItem && shopItem.price_usd_cents > 0) {
-                          if (!isConfirming) trackShopItemViewed(itemId, "raid", shopItem.price_usd_cents);
-                          setConfirmBuyItem(isConfirming ? null : itemId);
                         }
                       }}
-                      disabled={isBuying}
                       className={[
                         "w-full overflow-hidden transition-colors",
                         "border-[2px]",
-                        isOwned
+                        isAccessible
                           ? isActive
                             ? "border-[#39d353] bg-[rgba(57,211,83,0.05)]"
                             : "border-[#39d353]/40 bg-[rgba(57,211,83,0.02)] hover:border-[#39d353]/70"
-                          : isConfirming
-                            ? "border-red-500/60"
-                            : "border-border hover:border-red-500/40",
-                        !isOwned ? "bg-bg-card" : "",
+                          : "border-border hover:border-orange-500/40 opacity-70",
+                        !isAccessible ? "bg-bg-card" : "",
                       ].join(" ")}
                     >
                       <div className="h-24 bg-black/20 relative">
@@ -2042,29 +1968,15 @@ export default function ShopClient({
                         <span className="text-[10px] text-cream">
                           {ITEM_EMOJIS[itemId] ?? "?"} {ITEM_NAMES[itemId] ?? itemId}
                         </span>
-                        {isOwned ? (
+                        {isAccessible ? (
                           <span className="text-[10px]" style={{ color: ACCENT }}>✓</span>
                         ) : (
-                          <span className="text-[10px] text-muted">
-                            {isBuying ? "..." : shopItem ? formatPrice(shopItem) : ""}
+                          <span className="text-[10px] font-bold text-orange-400">
+                            LVL {reqLevel} REQ
                           </span>
                         )}
                       </div>
                     </button>
-                    {isConfirming && shopItem && (
-                      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 w-36 border-[2px] border-border bg-bg p-2 shadow-lg">
-                        <p className="text-[9px] text-cream text-center mb-1.5">{ITEM_NAMES[itemId]}</p>
-                        <p className="text-[10px] text-center mb-2" style={{ color: "#ff5555" }}>{formatPrice(shopItem)}</p>
-                        <div className="flex flex-col gap-1">
-                          <div className="flex gap-1">
-                            <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); }} className="flex-1 border-[2px] border-border py-1 text-[9px] text-muted hover:text-cream">Cancel</button>
-                            <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId); }} disabled={isBuying} className="btn-press flex-1 py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#ff5555", boxShadow: "1px 1px 0 0 #aa2222" }}>{isBuying ? "..." : "Buy"}</button>
-                          </div>
-                          <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "nowpayments"); }} disabled={isBuying} className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#f7931a", boxShadow: "1px 1px 0 0 #b36a00" }}>{isBuying ? "..." : "Pay with Crypto"}</button>
-                          <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "abacatepay"); }} disabled={isBuying} className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#32bcad", boxShadow: "1px 1px 0 0 #1a7a6e" }}>{isBuying ? "..." : "Pay with PIX"}</button>
-                        </div>
-                      </div>
-                    )}
                   </div>
                 );
               })}
@@ -2083,56 +1995,32 @@ export default function ShopClient({
               return (
                 <div className="grid grid-cols-3 gap-2 mb-0">
                   {RAID_TAG_ITEMS.map((itemId) => {
-                    const isOwned = owned.includes(itemId);
-                    const shopItem = getShopItem(itemId);
-                    const isBuying = buyingItem === itemId;
-                    const isConfirming = confirmBuyItem === itemId;
+                    const reqLevel = ITEM_UNLOCK_LEVELS[itemId];
+                    const isLevelLocked = reqLevel && xpLevel < reqLevel;
+                    const isAccessible = owned.includes(itemId) || !isLevelLocked;
 
                     return (
-                      <div key={itemId} className="relative" data-buy-popover>
-                        <button
-                          onClick={() => {
-                            if (isOwned) return;
-                            if (shopItem && shopItem.price_usd_cents > 0) {
-                              if (!isConfirming) trackShopItemViewed(itemId, "raid", shopItem.price_usd_cents);
-                              setConfirmBuyItem(isConfirming ? null : itemId);
-                            }
-                          }}
-                          disabled={isBuying}
+                      <div key={itemId} className="relative">
+                        <div
                           className={[
                             "relative flex flex-col items-center justify-center p-2 transition-all w-full aspect-square",
                             "border-[2px]",
-                            isOwned
+                            isAccessible
                               ? "border-[#39d353] bg-[rgba(57,211,83,0.05)]"
-                              : isConfirming
-                                ? "border-red-500/60"
-                                : "border-border hover:border-red-500/40",
-                            !isOwned ? "bg-bg-card" : "",
+                              : "border-border opacity-70 bg-bg-card",
                           ].join(" ")}
                         >
                           <div className="absolute top-0 left-0 h-1 w-full" style={{ backgroundColor: TAG_COLORS[itemId] ?? "#fff" }} />
                           <span className="text-2xl">{ITEM_EMOJIS[itemId] ?? "?"}</span>
                           <span className="mt-1 text-[9px] text-cream truncate w-full text-center">{ITEM_NAMES[itemId] ?? itemId}</span>
-                          {isOwned ? (
-                            <span className="mt-0.5 text-[8px]" style={{ color: ACCENT }}>✓</span>
+                          {isAccessible ? (
+                            <span className="mt-0.5 text-[8px]" style={{ color: ACCENT }}>UNLOCKED</span>
                           ) : (
-                            <span className="mt-0.5 text-[8px] text-muted">{isBuying ? "..." : shopItem ? formatPrice(shopItem) : ""}</span>
+                            <span className="mt-0.5 text-[8px] font-bold text-orange-400">
+                              LVL {reqLevel} REQ
+                            </span>
                           )}
-                        </button>
-                        {isConfirming && shopItem && (
-                          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 w-36 border-[2px] border-border bg-bg p-2 shadow-lg">
-                            <p className="text-[9px] text-cream text-center mb-1.5">{ITEM_NAMES[itemId]}</p>
-                            <p className="text-[10px] text-center mb-2" style={{ color: "#ff5555" }}>{formatPrice(shopItem)}</p>
-                            <div className="flex flex-col gap-1">
-                              <div className="flex gap-1">
-                                <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); }} className="flex-1 border-[2px] border-border py-1 text-[9px] text-muted hover:text-cream">Cancel</button>
-                                <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId); }} disabled={isBuying} className="btn-press flex-1 py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#ff5555", boxShadow: "1px 1px 0 0 #aa2222" }}>{isBuying ? "..." : "Buy"}</button>
-                              </div>
-                              <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "nowpayments"); }} disabled={isBuying} className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#f7931a", boxShadow: "1px 1px 0 0 #b36a00" }}>{isBuying ? "..." : "Pay with Crypto"}</button>
-                              {isBrazil && <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "abacatepay"); }} disabled={isBuying} className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#32bcad", boxShadow: "1px 1px 0 0 #1a7a6e" }}>{isBuying ? "..." : "Pay with PIX"}</button>}
-                            </div>
-                          </div>
-                        )}
+                        </div>
                       </div>
                     );
                   })}
@@ -2153,25 +2041,19 @@ export default function ShopClient({
               return (
                 <div className="grid grid-cols-3 gap-2">
                   {RAID_BOOST_ITEMS.map((itemId) => {
-                    const shopItem = getShopItem(itemId);
-                    const isBuying = buyingItem === itemId;
-                    const isConfirming = confirmBuyItem === itemId;
+                    const reqLevel = ITEM_UNLOCK_LEVELS[itemId];
+                    const isLevelLocked = reqLevel && xpLevel < reqLevel;
+                    const isAccessible = !isLevelLocked;
 
                     return (
-                      <div key={itemId} className="relative" data-buy-popover>
-                        <button
-                          onClick={() => {
-                            if (shopItem && shopItem.price_usd_cents > 0) {
-                              if (!isConfirming) trackShopItemViewed(itemId, "raid", shopItem.price_usd_cents);
-                              setConfirmBuyItem(isConfirming ? null : itemId);
-                            }
-                          }}
-                          disabled={isBuying}
+                      <div key={itemId} className="relative">
+                        <div
                           className={[
                             "relative flex flex-col items-center justify-center p-2 transition-all w-full aspect-square",
-                            "border-dashed border-[2px] border-orange-500/30",
-                            isConfirming ? "border-red-500/60 border-solid" : "",
-                            "bg-bg-card hover:border-orange-500/50",
+                            "border-dashed border-[2px]",
+                            isAccessible
+                              ? "border-orange-500/50 bg-[rgba(255,165,0,0.05)]"
+                              : "border-orange-500/20 opacity-60 bg-bg-card",
                           ].join(" ")}
                         >
                           <span className="absolute top-1 right-1 text-[8px] font-bold px-1 bg-orange-500/20 text-orange-400 border border-orange-500/30">
@@ -2179,22 +2061,14 @@ export default function ShopClient({
                           </span>
                           <span className="text-2xl">{ITEM_EMOJIS[itemId] ?? "?"}</span>
                           <span className="mt-1 text-[9px] text-cream truncate w-full text-center">{ITEM_NAMES[itemId] ?? itemId}</span>
-                          <span className="mt-0.5 text-[8px] text-muted">{isBuying ? "..." : shopItem ? formatPrice(shopItem) : ""}</span>
-                        </button>
-                        {isConfirming && shopItem && (
-                          <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 w-36 border-[2px] border-border bg-bg p-2 shadow-lg">
-                            <p className="text-[9px] text-cream text-center mb-1.5">{ITEM_NAMES[itemId]}</p>
-                            <p className="text-[10px] text-center mb-2" style={{ color: "#ff5555" }}>{formatPrice(shopItem)}</p>
-                            <div className="flex flex-col gap-1">
-                              <div className="flex gap-1">
-                                <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); }} className="flex-1 border-[2px] border-border py-1 text-[9px] text-muted hover:text-cream">Cancel</button>
-                                <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId); }} disabled={isBuying} className="btn-press flex-1 py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#ff5555", boxShadow: "1px 1px 0 0 #aa2222" }}>{isBuying ? "..." : "Buy"}</button>
-                              </div>
-                              <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "nowpayments"); }} disabled={isBuying} className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#f7931a", boxShadow: "1px 1px 0 0 #b36a00" }}>{isBuying ? "..." : "Pay with Crypto"}</button>
-                              {isBrazil && <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "abacatepay"); }} disabled={isBuying} className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#32bcad", boxShadow: "1px 1px 0 0 #1a7a6e" }}>{isBuying ? "..." : "Pay with PIX"}</button>}
-                            </div>
-                          </div>
-                        )}
+                          {isAccessible ? (
+                            <span className="mt-0.5 text-[8px]" style={{ color: "#ffaa00" }}>UNLOCKED</span>
+                          ) : (
+                            <span className="mt-0.5 text-[8px] font-bold text-orange-400">
+                              LVL {reqLevel} REQ
+                            </span>
+                          )}
+                        </div>
                       </div>
                     );
                   })}
@@ -2224,13 +2098,17 @@ export default function ShopClient({
             <p className="mb-1.5 text-[9px] uppercase tracking-wider text-muted">Defenses & Offenses</p>
             <div className="grid grid-cols-2 gap-3 mb-0">
               {RAID_CONSUMABLE_ITEMS.map((itemId) => {
-                const shopItem = getShopItem(itemId);
-                const isBuying = buyingItem === itemId;
-                const isConfirming = confirmBuyItem === itemId;
+                const reqLevel = ITEM_UNLOCK_LEVELS[itemId];
+                
+                // Scouting Satellite exception: has a quest requirement
+                let isLevelLocked = reqLevel && xpLevel < reqLevel;
+                if (itemId === "scouting_satellite" && !(acceptedMedium >= 10 || acceptedHard >= 5)) {
+                  isLevelLocked = true;
+                }
+                const isAccessible = !isLevelLocked;
                 
                 // Get inventory counts
                 const inventory = consumablesInventory.find(c => c.item_id === itemId);
-                const qty = inventory?.quantity ?? 0;
                 let weeklyUses = inventory?.weekly_uses ?? 0;
                 
                 // Check if week reset
@@ -2243,46 +2121,36 @@ export default function ShopClient({
                 }
 
                 return (
-                  <div key={itemId} className="relative" data-buy-popover>
-                    <button
-                      onClick={() => {
-                        if (shopItem && shopItem.price_usd_cents > 0) {
-                          if (!isConfirming) trackShopItemViewed(itemId, "consumables", shopItem.price_usd_cents);
-                          setConfirmBuyItem(isConfirming ? null : itemId);
-                        }
-                      }}
-                      disabled={isBuying}
+                  <div key={itemId} className="relative">
+                    <div
                       className={[
                         "w-full overflow-hidden transition-colors border-[2px]",
-                        isConfirming ? "border-red-500/60" : "border-border hover:border-[#ffaa00]/40",
-                        "bg-bg-card p-3 flex flex-col items-center",
+                        isAccessible ? "border-[#ffaa00]/40 bg-[rgba(255,170,0,0.05)]" : "border-border opacity-70 bg-bg-card",
+                        "p-3 flex flex-col items-center",
                       ].join(" ")}
                     >
                       <span className="text-3xl mb-2">{ITEM_EMOJIS[itemId] ?? "?"}</span>
                       <span className="text-[10px] text-cream mb-1 text-center font-bold">
                         {ITEM_NAMES[itemId] ?? itemId}
                       </span>
-                      <span className="mt-0.5 text-[8px] text-muted">
-                        Owned: {qty} | Used: {weeklyUses}/3
-                      </span>
-                      <span className="mt-2 text-[10px]" style={{ color: ACCENT }}>
-                        {isBuying ? "..." : shopItem ? formatPrice(shopItem) : ""}
-                      </span>
-                    </button>
-                    {isConfirming && shopItem && (
-                      <div className="absolute left-1/2 -translate-x-1/2 top-full mt-1 z-30 w-36 border-[2px] border-border bg-bg p-2 shadow-lg">
-                        <p className="text-[9px] text-cream text-center mb-1.5">{ITEM_NAMES[itemId]}</p>
-                        <p className="text-[10px] text-center mb-2" style={{ color: "#ff5555" }}>{formatPrice(shopItem)}</p>
-                        <div className="flex flex-col gap-1">
-                          <div className="flex gap-1">
-                            <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); }} className="flex-1 border-[2px] border-border py-1 text-[9px] text-muted hover:text-cream">Cancel</button>
-                            <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId); }} disabled={isBuying} className="btn-press flex-1 py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#ffaa00", boxShadow: "1px 1px 0 0 #b37700" }}>{isBuying ? "..." : "Buy"}</button>
-                          </div>
-                          <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "nowpayments"); }} disabled={isBuying} className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#f7931a", boxShadow: "1px 1px 0 0 #b36a00" }}>{isBuying ? "..." : "Pay with Crypto"}</button>
-                          {isBrazil && <button onClick={(e) => { e.stopPropagation(); setConfirmBuyItem(null); checkout(itemId, "abacatepay"); }} disabled={isBuying} className="btn-press w-full py-1 text-[9px] text-bg disabled:opacity-40" style={{ backgroundColor: "#32bcad", boxShadow: "1px 1px 0 0 #1a7a6e" }}>{isBuying ? "..." : "Pay with PIX"}</button>}
-                        </div>
-                      </div>
-                    )}
+                      {isAccessible ? (
+                        <>
+                          <span className="mt-0.5 text-[8px] font-bold" style={{ color: "#ffaa00" }}>UNLOCKED</span>
+                          <span className="mt-2 text-[8px] text-muted">
+                            Used: {weeklyUses}/3
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="mt-0.5 text-[8px] font-bold text-orange-400">
+                            {itemId === "scouting_satellite" ? "QUEST REQ" : `LVL ${reqLevel} REQ`}
+                          </span>
+                          <span className="mt-2 text-[8px] text-muted">
+                            Used: 0/3
+                          </span>
+                        </>
+                      )}
+                    </div>
                   </div>
                 );
               })}

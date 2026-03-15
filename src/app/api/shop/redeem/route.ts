@@ -14,7 +14,7 @@ export async function POST(request: Request) {
   const sb = getSupabaseAdmin();
   const { data: dev } = await sb
     .from("developers")
-    .select("id, github_login, claimed")
+    .select("id, github_login, claimed, xp_total")
     .eq("claimed_by", user.id)
     .single();
 

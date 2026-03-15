@@ -489,6 +489,205 @@ function TankMesh() {
   );
 }
 
+function FuturisticJetMesh() {
+  const afterburnerRef = useRef<THREE.Group>(null);
+  const wingLightLRef = useRef<THREE.Mesh>(null);
+  const wingLightRRef = useRef<THREE.Mesh>(null);
+  
+  // Wing trail attachment points for the particle system
+  const trailLRef = useRef<THREE.Group>(null);
+  const trailRRef = useRef<THREE.Group>(null);
+
+  useFrame(({ clock }) => {
+    const t = clock.elapsedTime;
+    
+    // Afterburner flicker
+    if (afterburnerRef.current) {
+      const flicker = 0.75 + Math.sin(t * 30) * 0.15 + Math.sin(t * 47) * 0.1;
+      afterburnerRef.current.scale.set(flicker, flicker, 1 + Math.sin(t * 20) * 0.4);
+    }
+    
+    // Wing tip strobe
+    const strobe = Math.sin(t * 6) > 0.7 ? 1 : 0.1;
+    if (wingLightLRef.current) {
+      const mat = wingLightLRef.current.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = strobe * 4;
+    }
+    if (wingLightRRef.current) {
+      const mat = wingLightRRef.current.material as THREE.MeshStandardMaterial;
+      mat.emissiveIntensity = strobe * 4;
+    }
+  });
+
+  return (
+    <group>
+      {/* Central spine/fuselage */}
+      <mesh position={[0, 0, 0]}>
+        <boxGeometry args={[0.9, 0.55, 4.5]} />
+        <meshStandardMaterial color="#21252b" roughness={0.7} metalness={0.3} />
+      </mesh>
+      
+      {/* Wing root blend (widens fuselage in the middle) */}
+      <mesh position={[0, -0.05, 0.5]}>
+        <boxGeometry args={[1.8, 0.35, 3.5]} />
+        <meshStandardMaterial color="#1a1d24" roughness={0.7} metalness={0.3} />
+      </mesh>
+
+      {/* Nose Section — Flat-bottomed, downward-sloping "Duckbill" shape (Super Monarch style) */}
+      <group position={[0, -0.05, -3.2]}>
+        {/* Main upper nose slope */}
+        <mesh position={[0, -0.05, 0]} rotation={[0.08, 0, 0]}>
+          <boxGeometry args={[0.55, 0.35, 2.5]} />
+          <meshStandardMaterial color="#1f2329" roughness={0.7} />
+        </mesh>
+        {/* Lower nose flat belly */}
+        <mesh position={[0, -0.2, 0]} rotation={[-0.02, 0, 0]}>
+          <boxGeometry args={[0.45, 0.15, 2.4]} />
+          <meshStandardMaterial color="#1a1d24" roughness={0.7} />
+        </mesh>
+        
+        {/* Pointy Nose tip — White/Light Grey, pinched and flat */}
+        <mesh position={[0, -0.15, -1.6]} rotation={[0.05, 0, 0]}>
+          <boxGeometry args={[0.15, 0.08, 1.2]} />
+          <meshStandardMaterial color="#e5e7eb" roughness={0.5} emissive="#e5e7eb" emissiveIntensity={0.1} />
+        </mesh>
+        {/* Extreme front tip point */}
+        <mesh position={[0, -0.16, -2.1]} rotation={[Math.PI / 2, 0, 0]}>
+          <cylinderGeometry args={[0.01, 0.08, 0.4, 4]} />
+          <meshStandardMaterial color="#e5e7eb" roughness={0.5} emissive="#e5e7eb" emissiveIntensity={0.2} />
+        </mesh>
+      </group>
+
+      {/* Cockpit Canopy — Glowing Amber/Gold to stand out against the night sky */}
+      <mesh position={[0, 0.35, -1.8]} rotation={[Math.PI/2, 0, 0]}>
+        <cylinderGeometry args={[0.25, 0.35, 1.6, 8]} />
+        <meshStandardMaterial color="#ffb700" roughness={0.2} emissive="#ff8800" emissiveIntensity={0.8} />
+      </mesh>
+
+      {/* Main Swept Wings — delta shape base (swept BACKWARDS) */}
+      <group position={[0, -0.1, 0.5]}>
+        <mesh position={[-2.2, 0, 0.6]} rotation={[0, -Math.PI / 6, 0]}>
+          <boxGeometry args={[3.8, 0.08, 1.8]} />
+          <meshStandardMaterial color="#1f2329" roughness={0.7} />
+        </mesh>
+        <mesh position={[2.2, 0, 0.6]} rotation={[0, Math.PI / 6, 0]}>
+          <boxGeometry args={[3.8, 0.08, 1.8]} />
+          <meshStandardMaterial color="#1f2329" roughness={0.7} />
+        </mesh>
+      </group>
+
+      {/* Canards (Front Wings) */}
+      <mesh position={[-0.9, 0, -2.1]} rotation={[0, -Math.PI / 5, 0]}>
+        <boxGeometry args={[1.2, 0.06, 0.6]} />
+        <meshStandardMaterial color="#1a1d24" roughness={0.7} />
+      </mesh>
+      <mesh position={[0.9, 0, -2.1]} rotation={[0, Math.PI / 5, 0]}>
+        <boxGeometry args={[1.2, 0.06, 0.6]} />
+        <meshStandardMaterial color="#1a1d24" roughness={0.7} />
+      </mesh>
+
+      {/* Tall Dual Tail Fins (V-Tail, angled slightly out) */}
+      <group position={[0, 0.65, 2.0]}>
+        {/* Left Fin Base (Dark) */}
+        <mesh position={[-0.7, 0, 0]} rotation={[0.2, 0, -0.2]}>
+          <boxGeometry args={[0.08, 1.4, 1.2]} />
+          <meshStandardMaterial color="#1f2329" roughness={0.7} />
+        </mesh>
+        {/* Left Fin Tip (Orange) */}
+        <mesh position={[-0.85, 0.8, 0.3]} rotation={[0.2, 0, -0.2]}>
+          <boxGeometry args={[0.09, 0.5, 1.0]} />
+          <meshStandardMaterial color="#ea580c" roughness={0.5} emissive="#ea580c" emissiveIntensity={0.2} />
+        </mesh>
+        
+        {/* Right Fin Base (Dark) */}
+        <mesh position={[0.7, 0, 0]} rotation={[0.2, 0, 0.2]}>
+          <boxGeometry args={[0.08, 1.4, 1.2]} />
+          <meshStandardMaterial color="#1f2329" roughness={0.7} />
+        </mesh>
+        {/* Right Fin Tip (Orange) */}
+        <mesh position={[0.85, 0.8, 0.3]} rotation={[0.2, 0, 0.2]}>
+          <boxGeometry args={[0.09, 0.5, 1.0]} />
+          <meshStandardMaterial color="#ea580c" roughness={0.5} emissive="#ea580c" emissiveIntensity={0.2} />
+        </mesh>
+      </group>
+
+      {/* Twin Engine Pods (Rear) */}
+      <mesh position={[-0.55, -0.25, 1.8]}>
+        <boxGeometry args={[0.55, 0.55, 1.8]} />
+        <meshStandardMaterial color="#111827" roughness={0.8} />
+      </mesh>
+      <mesh position={[0.55, -0.25, 1.8]}>
+        <boxGeometry args={[0.55, 0.55, 1.8]} />
+        <meshStandardMaterial color="#111827" roughness={0.8} />
+      </mesh>
+
+      {/* Exhaust Nozzles */}
+      <mesh position={[-0.55, -0.25, 2.8]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.25, 0.28, 0.4, 8]} />
+        <meshStandardMaterial color="#0f172a" metalness={0.8} />
+      </mesh>
+      <mesh position={[0.55, -0.25, 2.8]} rotation={[Math.PI / 2, 0, 0]}>
+        <cylinderGeometry args={[0.25, 0.28, 0.4, 8]} />
+        <meshStandardMaterial color="#0f172a" metalness={0.8} />
+      </mesh>
+      
+      {/* Afterburner flames */}
+      <group ref={afterburnerRef} position={[0, -0.25, 3.1]}>
+        {/* Left */}
+        <mesh position={[-0.55, 0, 0]}>
+          <boxGeometry args={[0.3, 0.3, 1.5]} />
+          <meshStandardMaterial color="#00ccff" emissive="#0088ff" emissiveIntensity={6} toneMapped={false} transparent opacity={0.85} />
+        </mesh>
+        <mesh position={[-0.55, 0, 0]}>
+          <boxGeometry args={[0.15, 0.15, 1.8]} />
+          <meshStandardMaterial color="#ffffff" emissive="#aaddff" emissiveIntensity={8} toneMapped={false} transparent opacity={0.6} />
+        </mesh>
+        {/* Right */}
+        <mesh position={[0.55, 0, 0]}>
+          <boxGeometry args={[0.3, 0.3, 1.5]} />
+          <meshStandardMaterial color="#00ccff" emissive="#0088ff" emissiveIntensity={6} toneMapped={false} transparent opacity={0.85} />
+        </mesh>
+        <mesh position={[0.55, 0, 0]}>
+          <boxGeometry args={[0.15, 0.15, 1.8]} />
+          <meshStandardMaterial color="#ffffff" emissive="#aaddff" emissiveIntensity={8} toneMapped={false} transparent opacity={0.6} />
+        </mesh>
+      </group>
+
+      {/* Tiny subtle green/cyan emissive decal details to match the sci-fi look exactly */}
+      <mesh position={[-0.8, 0.28, -1.0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.15, 0.4]} />
+        <meshBasicMaterial color="#34d399" />
+      </mesh>
+      <mesh position={[0.8, 0.28, -1.0]} rotation={[-Math.PI / 2, 0, 0]}>
+        <planeGeometry args={[0.15, 0.4]} />
+        <meshBasicMaterial color="#34d399" />
+      </mesh>
+
+      {/* Wing tip strobe lights */}
+      <mesh ref={wingLightLRef} position={[-4.0, -0.1, 1.5]}>
+        <boxGeometry args={[0.15, 0.1, 0.15]} />
+        <meshStandardMaterial color="#ff3333" emissive="#ff0000" emissiveIntensity={4} toneMapped={false} />
+      </mesh>
+      <mesh ref={wingLightRRef} position={[4.0, -0.1, 1.5]}>
+        <boxGeometry args={[0.15, 0.1, 0.15]} />
+        <meshStandardMaterial color="#33ff33" emissive="#00ff00" emissiveIntensity={4} toneMapped={false} />
+      </mesh>
+      
+      {/* Wingtip Vapor Trails (Using actual scattering particle system) */}
+      <group position={[-4.0, -0.1, 1.6]} ref={trailLRef}>
+         <SmokeTrail vehicleRef={trailLRef} active={true} />
+      </group>
+      <group position={[4.0, -0.1, 1.6]} ref={trailRRef}>
+         <SmokeTrail vehicleRef={trailRRef} active={true} />
+      </group>
+
+      {/* Engine glow point lights */}
+      <pointLight position={[-0.55, -0.25, 3.4]} color="#00aaff" intensity={6} distance={12} />
+      <pointLight position={[0.55, -0.25, 3.4]} color="#00aaff" intensity={6} distance={12} />
+    </group>
+  );
+}
+
 export function VehicleMesh({ type }: { type: string }) {
   switch (type) {
     case "raid_helicopter": return <HelicopterMesh />;
@@ -497,6 +696,7 @@ export function VehicleMesh({ type }: { type: string }) {
     case "raid_b2_bomber": return <B2BomberMesh />;
     case "raid_ufo": return <UFOMesh />;
     case "vehicle_tank": return <TankMesh />;
+    case "futuristic_jet": return <FuturisticJetMesh />;
     default: return <AirplaneMesh />;
   }
 }

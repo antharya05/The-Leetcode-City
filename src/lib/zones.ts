@@ -84,9 +84,13 @@ export const ITEM_UNLOCK_LEVELS: Record<string, number> = {
   raid_rocket: 12,
   raid_b2_bomber: 20,
   raid_ufo: 30,
-  vehicle_tank: 10,
-  emp_device: 18,
   sabotage_virus: 22,
+  raid_boost_small: 3,
+  raid_boost_medium: 12,
+  raid_boost_large: 25,
+  tag_neon: 5,
+  tag_fire: 15,
+  tag_gold: 25,
 };
 
 export const ITEM_EMOJIS: Record<string, string> = {
