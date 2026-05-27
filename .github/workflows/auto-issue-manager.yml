@@ -37,7 +37,7 @@ jobs:
             
             Evaluate this issue. Is it a good issue, or does it seem like spam, redundant, or low-effort?
             Respond with a brief, friendly comment addressing the user.
-            If it's good, thank them and say a maintainer will review it shortly.
+            If it's good, thank them, say a maintainer will review it shortly, and kindly ask them to ⭐ Star the repository to support the project!
             If it's poor quality or a duplicate, gently ask for more details or clarification. Keep it concise.`;
             
             try {
@@ -98,7 +98,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.issue.number,
-                  body: `Hello @${commenter}, you have been selected to work on this issue! 🚀 Please read the \`CONTRIBUTING.md\` file before starting. We look forward to your Pull Request.`
+                  body: `Hello @${commenter}, you have been selected to work on this issue! 🚀 Please read the \`CONTRIBUTING.md\` file before starting. We look forward to your Pull Request.\n\n⭐ **If you're excited to contribute, please consider starring this repository to help increase its visibility and support the developer!**`
                 });
                 
                 // Automatically add labels if not present

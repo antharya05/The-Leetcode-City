@@ -57,7 +57,7 @@ jobs:
             
             Instructions:
             - If you find ANY mistakes, security vulnerabilities, or bugs, respond with exactly "STATE: CHANGES_REQUESTED" on the first line, followed by a detailed explanation of what the user needs to fix.
-            - If the code looks perfectly secure and bug-free, respond with exactly "STATE: APPROVED" on the first line, followed by a brief positive summary.
+            - If the code looks perfectly secure and bug-free, respond with exactly "STATE: APPROVED" on the first line, followed by a brief positive summary. Please also add a polite request asking them to ⭐ Star the repository to help increase its visibility and support the developer!
             `;
             
             console.log("Sending diff to OpenAI...");
