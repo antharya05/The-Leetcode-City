@@ -98,7 +98,7 @@ jobs:
                   owner: context.repo.owner,
                   repo: context.repo.repo,
                   issue_number: context.issue.number,
-                  body: `Hello @${commenter}, you have been selected to work on this issue! 🚀 Please read the \`CONTRIBUTING.md\` file before starting. We look forward to your Pull Request.\n\n⭐ **If you're excited to contribute, please consider starring this repository to help increase its visibility and support the developer!**`
+                  body: `Hello @${commenter}, you have been selected to work on this issue! 🚀 Please read the \`CONTRIBUTING.md\` file before starting. We look forward to your Pull Request.\n\n⭐ **If you're excited to contribute, please consider starring this repository to help increase its visibility and support the developer!**\n\n🔒 *This conversation will now be locked. Please use your Pull Request for any further discussion about this issue.*`
                 });
                 
                 // Automatically add labels if not present
@@ -115,6 +115,14 @@ jobs:
                     labels: labelsToAdd
                   });
                 }
+                
+                // Lock the conversation so only collaborators can comment
+                await github.rest.issues.lock({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  issue_number: context.issue.number,
+                  lock_reason: 'resolved'
+                });
               } else if (!assignees.includes(commenter)) {
                 // Issue is already assigned
                 await github.rest.issues.createComment({
