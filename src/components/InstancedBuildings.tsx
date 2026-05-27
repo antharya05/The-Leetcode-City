@@ -122,8 +122,10 @@ const fragmentShader = /* glsl */ `
 
     // Emissive glow for lit windows, scaled by city energy
     // Both ambient and emissive dim when city sleeps
-    float ambientBase = 0.08 + 0.22 * uCityEnergy;
-    vec3 emissive = wallColor * 1.8 * uCityEnergy;
+    // Use a squared curve so sleeping (0.15) is very dark but waking up feels responsive
+    float energySq = uCityEnergy * uCityEnergy;
+    float ambientBase = 0.04 + 0.26 * energySq;
+    vec3 emissive = wallColor * 2.2 * energySq;
     vec3 wallFinal = wallColor * ambientBase + emissive;
 
     // Live building boost: pushes windows past bloom threshold
@@ -259,7 +261,7 @@ export default memo(function InstancedBuildings({
         uFocusedIdB: { value: -1.0 },
         uDimOpacity: { value: 0.6 },
         uDimEmissive: { value: 0.5 },
-        uCityEnergy: { value: 1.0 },
+        uCityEnergy: { value: 0.15 },
       },
       vertexShader,
       fragmentShader,
@@ -445,11 +447,11 @@ export default memo(function InstancedBuildings({
       lastFogFar.current = fog.far;
     }
 
-    // Smooth lerp city energy (transition over ~5 seconds)
+    // Smooth lerp city energy (transition over ~3 seconds)
     const current = material.uniforms.uCityEnergy.value;
     const target = cityEnergyRef.current;
     if (Math.abs(current - target) > 0.001) {
-      material.uniforms.uCityEnergy.value += (target - current) * 0.02;
+      material.uniforms.uCityEnergy.value += (target - current) * 0.04;
     }
   });
 
