@@ -110,6 +110,46 @@ jobs:
             core.setOutput('pr_number', fullPR.number.toString());
             core.setOutput('pr_title', fullPR.title);
             core.setOutput('pr_author', fullPR.user.login);
+            core.setOutput('head_sha', headSha);
+
+      - name: Wait for Vercel Preview
+        if: steps.get-pr.outputs.pr_number != ''
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const headSha = '${{ steps.get-pr.outputs.head_sha }}';
+            console.log(`Waiting for Vercel deployment on SHA ${headSha}...`);
+            
+            const maxRetries = 30; // 7.5 minutes total
+            const delayMs = 15000;
+            
+            for (let i = 0; i < maxRetries; i++) {
+              const { data: commitStatus } = await github.rest.repos.getCombinedStatusForRef({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                ref: headSha
+              });
+              
+              const vercelStatus = commitStatus.statuses.find(s => s.context === 'Vercel');
+              
+              if (vercelStatus) {
+                console.log(`Vercel status: ${vercelStatus.state}`);
+                if (vercelStatus.state === 'success') {
+                  console.log('Vercel preview successfully deployed!');
+                  return;
+                } else if (vercelStatus.state === 'error' || vercelStatus.state === 'failure') {
+                  core.setFailed('Vercel deployment failed. Aborting auto-approval.');
+                  return;
+                }
+              } else {
+                console.log('Vercel status not yet reported for this commit.');
+              }
+              
+              console.log(`Sleeping for 15 seconds... (Attempt ${i + 1}/${maxRetries})`);
+              await new Promise(r => setTimeout(r, delayMs));
+            }
+            
+            core.setFailed('Timed out waiting for Vercel preview deployment.');
 
       - name: Assign Ixotic27 as Reviewer
         if: steps.get-pr.outputs.pr_number != ''
