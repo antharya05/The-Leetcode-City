@@ -3211,7 +3211,7 @@ function HomeContent() {
       />
       <button
         onClick={() => setAnalyticsOpen((v) => !v)}
-        className="fixed top-3 right-14 z-40 border border-border bg-bg/90 px-2 py-1 text-[9px] hover:border-border-light transition-colors"
+        className="fixed top-[52px] right-3 z-40 border border-border bg-bg/90 px-2 py-1 text-[9px] transition-colors hover:border-border-light sm:top-[60px] sm:right-4"
         style={{ color: analyticsOpen ? "#ffa116" : "#8c8c9c" }}
       >
         [ANALYTICS]
