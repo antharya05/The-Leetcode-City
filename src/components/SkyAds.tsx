@@ -216,7 +216,7 @@ function BannerPlane({
     const z = rz * Math.sin(a);
     const vx = -rx * Math.sin(a);
     const vz = rz * Math.cos(a);
-    const yaw = Math.atan2(vx, vz);
+    const yaw = Math.atan2(-vx, -vz);
     const bank = -Math.sin(a) * 0.2;
 
     if (groupRef.current) {
