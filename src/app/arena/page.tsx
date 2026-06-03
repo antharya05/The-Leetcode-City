@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { createBrowserSupabase } from "@/lib/supabase";
@@ -90,6 +90,8 @@ export default function ArenaPage() {
   const [streakFreezes, setStreakFreezes] = useState<number>(0);
   
   const [loading, setLoading] = useState(true);
+  const isFirstLoad = useRef(true);
+  const lastLoadedUsername = useRef<string | null | undefined>(undefined);
   const [actionLoading, setActionLoading] = useState<string | null>(null);
   const [message, setMessage] = useState<{ text: string; type: "success" | "error" } | null>(null);
   const [expandedChallenge, setExpandedChallenge] = useState<string | null>(null);
@@ -137,7 +139,10 @@ export default function ArenaPage() {
 
   // Load arena data
   const loadData = async () => {
-    setLoading(true);
+    const isUserChanged = lastLoadedUsername.current !== username;
+    if (isFirstLoad.current || isUserChanged) {
+      setLoading(true);
+    }
     try {
       // Fetch challenges and leaderboard (public endpoints)
       const [challengesRes, leaderboardRes] = await Promise.all([
@@ -187,6 +192,8 @@ export default function ArenaPage() {
       console.error("Error loading Arena data:", err);
     } finally {
       setLoading(false);
+      isFirstLoad.current = false;
+      lastLoadedUsername.current = username;
     }
   };
 
