@@ -94,11 +94,10 @@ export async function POST(request: Request) {
 
         // 4. Atomic conditional deduction — only succeeds if balance is still sufficient
         const { data: deducted, error: deductError } = await admin
-            .from("developers")
-            .update({ points: dev.points - item.price_points })
-            .eq("id", dev.id)
-            .gte("points", item.price_points) // guard — race condition loses here
-            .eq("points", dev.points)         // optimistic lock on exact snapshot value
+            .rpc("deduct_points_atomic", {
+                p_developer_id: dev.id,
+                p_amount: item.price_points,
+            })
             .select("points")
             .maybeSingle();
 
@@ -111,12 +110,15 @@ export async function POST(request: Request) {
     // Fulfill/grant consumable items to developers (updates tables and determines correct status string)
     const { status: purchaseStatus } = await fulfillItemPurchase(dev.id, item_id, admin);
 
+    const idempotencyKey = `points_${dev.id}_${item_id}_${Date.now()}`;
+
     const { data: purchase, error: purchaseError } = await admin
         .from("purchases")
         .insert({
             developer_id: dev.id,
             item_id: item_id,
             provider: "points",
+            idempotency_key: idempotencyKey,
             amount_cents: 0,
             currency: "usd",
             status: purchaseStatus,
