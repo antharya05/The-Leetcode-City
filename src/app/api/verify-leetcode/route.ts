@@ -82,7 +82,7 @@ export async function POST(req: Request) {
         const aboutMe = await fetchLeetCodeAboutMe(leetcode_username);
 
         if (aboutMe === null) {
-            return NextResponse.json({ error: "Could not find this GitHub account" }, { status: 404 });
+            return NextResponse.json({ error: "Could not find this LeetCode account" }, { status: 404 });
         }
 
         if (!aboutMe.includes(expectedToken)) {
