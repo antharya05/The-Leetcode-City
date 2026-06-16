@@ -5,6 +5,7 @@ import { autoEquipIfSolo, fulfillItemPurchase } from "@/lib/items";
 import { SKY_AD_PLANS, isValidPlanId } from "@/lib/skyAdPlans";
 import { sendPurchaseNotification, sendGiftSentNotification } from "@/lib/notification-senders/purchase";
 import { sendGiftReceivedNotification } from "@/lib/notification-senders/gift";
+import { InfrastructureError } from "@/lib/errors";
 import type Stripe from "stripe";
 
 // Disable body parsing — Stripe needs raw body for signature verification
@@ -36,6 +37,22 @@ export async function POST(request: Request) {
   }
 
   const sb = getSupabaseAdmin();
+
+  // ─── Idempotency Check ───
+  // Attempt to log the event ID. If it already exists, this is a duplicate delivery.
+  const { error: idempotencyError } = await sb
+    .from("stripe_processed_events")
+    .insert({ id: event.id });
+
+  if (idempotencyError) {
+    if (idempotencyError.code === "23505") {
+      // 23505 = unique_violation (event already processed)
+      return NextResponse.json({ received: true, duplicate: true });
+    }
+    // For other transient DB errors, return 500 so Stripe retries
+    console.error("Stripe idempotency check failed:", idempotencyError);
+    return NextResponse.json({ error: "Database error" }, { status: 500 });
+  }
 
   try {
     switch (event.type) {
@@ -287,10 +304,14 @@ export async function POST(request: Request) {
       }
     }
   } catch (err) {
-    // Log but return 200 — we don't want Stripe to retry on business logic errors
-    console.error("Stripe webhook handler error:", err);
+    if (err instanceof InfrastructureError) {
+      // Transient failure — let Stripe retry by returning 500
+      console.error("[Stripe webhook] Infrastructure error, returning 500 for retry:", err.message, err.cause);
+      return NextResponse.json({ error: "Internal server error" }, { status: 500 });
+    }
+    // BusinessLogicError or unknown — return 200 to prevent futile retries
+    console.error("[Stripe webhook] Business logic or unexpected error:", err);
   }
 
-  // Always return 200 to prevent Stripe retries
   return NextResponse.json({ received: true });
 }
