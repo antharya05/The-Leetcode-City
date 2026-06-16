@@ -3514,6 +3514,45 @@ function HomeContent() {
             </button>
           </div>
 
+          {/* Explore-mode search — reuses searchUser() so the camera flies (via CameraFocus) to the matched building */}
+          {!compareBuilding && !comparePair && (
+            <div className="pointer-events-auto absolute top-3 left-32 right-3 z-[31] sm:left-36 sm:right-auto sm:top-4 sm:w-72">
+              <form onSubmit={handleSubmit} className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={username}
+                  onChange={(e) => {
+                    setUsername(e.target.value);
+                    if (feedback?.type === "error") setFeedback(null);
+                  }}
+                  aria-label="Search a LeetCode username and fly to their building"
+                  placeholder="search a username"
+                  className="min-w-0 flex-1 border-[3px] border-border bg-bg/70 px-3 py-1.5 text-base text-cream outline-none backdrop-blur-sm transition-colors placeholder:text-dim normal-case sm:text-[11px]"
+                  onFocus={(e) => (e.currentTarget.style.borderColor = theme.accent)}
+                  onBlur={(e) => (e.currentTarget.style.borderColor = "")}
+                />
+                <button
+                  type="submit"
+                  disabled={loading || !username.trim()}
+                  className="btn-press flex-shrink-0 border-[3px] border-transparent px-3 py-1.5 text-[11px] text-bg disabled:opacity-40"
+                  style={{ backgroundColor: theme.accent }}
+                >
+                  {loading ? <span className="blink-dot inline-block">_</span> : "Go"}
+                </button>
+              </form>
+              {feedback && (
+                <div className="mt-1.5">
+                  <SearchFeedback
+                    feedback={feedback}
+                    accentColor={theme.accent}
+                    onDismiss={() => setFeedback(null)}
+                    onRetry={searchUser}
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Theme switcher + Cycle + Radio (bottom-left) — above ticker */}
           <div className="pointer-events-auto fixed bottom-10 left-3 z-[31] flex items-center gap-2 sm:left-4">
             <button
