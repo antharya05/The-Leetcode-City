@@ -109,6 +109,51 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const ALLOWED_STATUSES = new Set([
+    "accepted",
+    "wrong_answer",
+    "time_limit_exceeded",
+    "runtime_error",
+    "compile_error",
+    "memory_limit_exceeded",
+  ]);
+
+  const ALLOWED_LANGUAGES = new Set([
+    "python",
+    "python3",
+    "javascript",
+    "typescript",
+    "java",
+    "cpp",
+    "c",
+    "csharp",
+    "go",
+    "rust",
+    "ruby",
+    "swift",
+    "kotlin",
+    "scala",
+    "php",
+  ]);
+
+  if (!ALLOWED_STATUSES.has(status)) {
+    return NextResponse.json({ error: "Invalid status value" }, { status: 400 });
+  }
+
+  if (language !== undefined && language !== null && !ALLOWED_LANGUAGES.has(language)) {
+    return NextResponse.json({ error: "Invalid language value" }, { status: 400 });
+  }
+
+  if (code !== undefined && code !== null) {
+    if (Buffer.byteLength(code, "utf8") > 65536) {
+      return NextResponse.json({ error: "Code exceeds maximum size limit" }, { status: 400 });
+    }
+  }
+
+  if (code_hash !== undefined && code_hash !== null && !/^[0-9a-f]{1,128}$/i.test(code_hash)) {
+    return NextResponse.json({ error: "Invalid code_hash format" }, { status: 400 });
+  }
+
   const sb = getSupabaseAdmin();
 
   // 1. Fetch challenge details (if linked) and developer timezone in parallel
