@@ -68,7 +68,16 @@ export async function POST(request: Request) {
    }
   const file = formData.get("file") as File | null;
   const slotIndexRaw = formData.get("slot_index");
-  const slotIndex = slotIndexRaw !== null ? parseInt(slotIndexRaw as string, 10) : 0;
+  const slotIndexStr = slotIndexRaw !== null ? String(slotIndexRaw).trim() : "0";
+
+  if (!/^\d+$/.test(slotIndexStr)) {
+    return NextResponse.json(
+      { error: "Invalid slot_index" },
+      { status: 400 }
+    );
+  }
+
+  const slotIndex = parseInt(slotIndexStr, 10);
 
   if (isNaN(slotIndex) || slotIndex < 0) {
     return NextResponse.json(
